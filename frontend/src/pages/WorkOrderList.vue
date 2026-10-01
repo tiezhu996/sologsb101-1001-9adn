@@ -376,6 +376,18 @@ const tableRows = computed(() => workOrderStore.sortedRows)
           </template>
         </el-table-column>
         <el-table-column label="派工班组" prop="order.team" width="140" />
+        <el-table-column label="来源" width="140">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.order.sourceBatchId"
+              :content="`来源记录号：${row.order.sourceRecordId ?? '—'}`"
+              placement="top"
+            >
+              <el-tag size="small" type="info" effect="plain">{{ row.order.sourceTeam || '离线巡检包' }}</el-tag>
+            </el-tooltip>
+            <span v-else class="muted">本地派工</span>
+          </template>
+        </el-table-column>
         <el-table-column label="限期" width="180">
           <template #default="{ row }">
             <div class="cell-stack">

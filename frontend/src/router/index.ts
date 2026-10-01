@@ -30,6 +30,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '维修工单', icon: 'Tools' }
   },
   {
+    path: '/batches',
+    name: 'inspection-batches',
+    component: () => import('@/pages/InspectionBatches.vue'),
+    meta: { title: '离线巡检包合并', icon: 'Connection' }
+  },
+  {
     path: '/report',
     name: 'report-view',
     component: () => import('@/pages/ReportView.vue'),

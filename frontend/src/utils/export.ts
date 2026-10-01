@@ -6,6 +6,8 @@ import {
   stampBackupTime,
   type BackupPayload
 } from '@/utils/db'
+import { buildInspectionPack } from '@/utils/inspectionMerge'
+import type { InspectionPack } from '@/types/inspectionBatch'
 import { reportFileName, type TurbineReport } from '@/utils/report'
 
 const COLLECTIONS = ['turbines', 'blades', 'segments', 'defects', 'workOrders'] as const
@@ -42,14 +44,15 @@ export function validateBackup(input: unknown): {
   return { ok: true, errors, payload }
 }
 
-/** 组装当前本地数据的全量备份对象 */
+/** 组装当前本地数据的全量备份对象（含待核对批次，便于整机迁移） */
 export async function buildBackupPayload(): Promise<BackupPayload> {
-  const [turbines, blades, segments, defects, workOrders] = await Promise.all([
+  const [turbines, blades, segments, defects, workOrders, inspectionBatches] = await Promise.all([
     db.turbines.toArray(),
     db.blades.toArray(),
     db.segments.toArray(),
     db.defects.toArray(),
-    db.workOrders.toArray()
+    db.workOrders.toArray(),
+    db.inspectionBatches.toArray()
   ])
   return {
     app: 'gbwindblade',
@@ -59,7 +62,8 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     blades,
     segments,
     defects,
-    workOrders
+    workOrders,
+    inspectionBatches
   }
 }
 
@@ -107,6 +111,18 @@ export function exportReportJson(report: TurbineReport): string {
   return fileName
 }
 
+/** 导出供外委检修队在无网机位使用 / 回传的离线巡检包 */
+export async function exportInspectionPackJson(
+  sourceTeam: string
+): Promise<{ fileName: string; pack: InspectionPack }> {
+  const pack = await buildInspectionPack(sourceTeam)
+  const teamPart = (sourceTeam.trim() || 'onsite').replace(/[^\w一-龥-]+/g, '-')
+  const stamp = pack.exportedAt.slice(0, 19).replace(/[:T]/g, '')
+  const fileName = `gbwindblade-inspection-pack-${teamPart}-${stamp}.json`
+  download(fileName, JSON.stringify(pack, null, 2))
+  return { fileName, pack }
+}
+
 /** 读取用户选择的文件文本 */
 export function readFileText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -117,19 +133,36 @@ export function readFileText(file: File): Promise<string> {
   })
 }
 
-/** 导入备份：overwrite=true 先清空全部表，否则按主键合并（同 id 覆盖） */
+/**
+ * 导入备份：overwrite=true 先清空全部表（含待核对批次），否则按主键合并业务五表。
+ * 待核对批次仅在覆盖导入时随文件带入；合并 / 追加不动本地批次，避免污染核对现场。
+ */
 export async function importBackup(
   payload: BackupPayload,
   overwrite: boolean
 ): Promise<Record<CollectionKey, number>> {
   if (overwrite) await clearAllTables()
-  await db.transaction('rw', [db.turbines, db.blades, db.segments, db.defects, db.workOrders], async () => {
-    await db.turbines.bulkPut(payload.turbines)
-    await db.blades.bulkPut(payload.blades)
-    await db.segments.bulkPut(payload.segments)
-    await db.defects.bulkPut(payload.defects)
-    await db.workOrders.bulkPut(payload.workOrders)
-  })
+  await db.transaction(
+    'rw',
+    [
+      db.turbines,
+      db.blades,
+      db.segments,
+      db.defects,
+      db.workOrders,
+      ...(overwrite && payload.inspectionBatches ? [db.inspectionBatches] : [])
+    ],
+    async () => {
+      await db.turbines.bulkPut(payload.turbines)
+      await db.blades.bulkPut(payload.blades)
+      await db.segments.bulkPut(payload.segments)
+      await db.defects.bulkPut(payload.defects)
+      await db.workOrders.bulkPut(payload.workOrders)
+      if (overwrite && payload.inspectionBatches) {
+        await db.inspectionBatches.bulkPut(payload.inspectionBatches)
+      }
+    }
+  )
   return countPayload(payload)
 }
 

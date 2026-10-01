@@ -27,6 +27,19 @@ export interface Defect {
   /** 发现日期 YYYY-MM-DD */
   foundAt: string
   state: DefectState
+  /** 来源批次 id：由离线巡检包确认写入时留痕；本地直接标注的记录无此字段 */
+  sourceBatchId?: string
+  /** 来源检修队（巡检包导出方） */
+  sourceTeam?: string
+  /** 来源缺陷记录编号（现场原 id），便于跨设备对账 */
+  sourceRecordId?: string
+  /** 被现场值覆盖前的本地原值（仅覆盖写入时留存，撤回批次时恢复） */
+  originalBeforeMerge?: {
+    lengthMm: number
+    widthMm: number
+    severity: Severity
+    face: SegmentFace
+  } | null
   createdAt: number
   updatedAt: number
 }

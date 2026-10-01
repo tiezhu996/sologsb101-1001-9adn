@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
+    "test:merge": "node --import tsx --test scripts/test-merge.ts",
     "preview": "vite preview --port 22801"
   },
   "dependencies": {
@@ -20,6 +21,8 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@vitejs/plugin-vue": "^5.2.1",
+    "fake-indexeddb": "^6.2.5",
+    "tsx": "^4.23.15",
     "typescript": "~5.7.3",
     "vite": "^6.1.0",
     "vue-tsc": "^2.2.0"

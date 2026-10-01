@@ -16,6 +16,10 @@ export interface WorkOrder {
   acceptor: string
   /** 闭环时间戳，未闭环为 null */
   closedAt: number | null
+  /** 来源批次 id / 检修队 / 现场工单记录号：离线包确认写入时留痕 */
+  sourceBatchId?: string
+  sourceTeam?: string
+  sourceRecordId?: string
   createdAt: number
   updatedAt: number
 }

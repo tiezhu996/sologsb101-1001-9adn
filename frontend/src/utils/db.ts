@@ -4,12 +4,13 @@ import type { Blade, BladeMaterial, BladeSerial } from '@/types/blade'
 import type { Segment, SegmentFace } from '@/types/segment'
 import type { Defect, DefectState, DefectType, Severity } from '@/types/defect'
 import type { WorkOrder, WorkOrderState } from '@/types/workOrder'
+import type { InspectionBatch } from '@/types/inspectionBatch'
 
 /** 本地 IndexedDB 库名 */
 export const DB_NAME = 'gbwindblade'
 
 /** 本地结构版本号：新增 / 修改表结构时必须递增，并补充 upgrade 迁移 */
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 /** localStorage 侧的少量元数据键 */
 export const LS_KEYS = {
@@ -38,9 +39,11 @@ export interface BackupPayload {
   segments: Segment[]
   defects: Defect[]
   workOrders: WorkOrder[]
+  /** 覆盖导入时可一并带入待核对批次；合并 / 追加导入及巡检包不含此字段 */
+  inspectionBatches?: InspectionBatch[]
 }
 
-/** 全部业务表集合，清空与导入共用 */
+/** 业务五表：报告 / 完成情况统计只认这五张表（待核对批次不参与） */
 export const ALL_TABLES = [
   'turbines',
   'blades',
@@ -55,6 +58,8 @@ export class WindBladeDatabase extends Dexie {
   segments!: Table<Segment, string>
   defects!: Table<Defect, string>
   workOrders!: Table<WorkOrder, string>
+  /** 离线巡检包待核对批次：确认前不写业务五表 */
+  inspectionBatches!: Table<InspectionBatch, string>
 
   constructor() {
     super(DB_NAME)
@@ -66,7 +71,7 @@ export class WindBladeDatabase extends Dexie {
       workOrders: 'id, defectId, team, state, updatedAt'
     })
     // v2：分段补充检修面索引，缺陷补充面位 / 状态 / 发现日期索引，工单补充限期索引
-    this.version(DB_VERSION)
+    this.version(2)
       .stores({
         turbines: 'id, code, model, commissionDate, updatedAt',
         blades: 'id, turbineId, serial, material, updatedAt',
@@ -101,6 +106,15 @@ export class WindBladeDatabase extends Dexie {
             if (!segment.face) segment.face = 'PS'
           })
       })
+    // v3：新增离线巡检包待核对批次表；缺陷 / 工单补充来源批次索引（新增可选字段无需数据迁移）
+    this.version(DB_VERSION).stores({
+      turbines: 'id, code, model, commissionDate, updatedAt',
+      blades: 'id, turbineId, serial, material, updatedAt',
+      segments: 'id, bladeId, index, face, updatedAt',
+      defects: 'id, segmentId, type, severity, face, state, foundAt, sourceBatchId, updatedAt',
+      workOrders: 'id, defectId, team, state, dueDate, sourceBatchId, updatedAt',
+      inspectionBatches: 'id, state, sourceTeam, stagedAt, updatedAt'
+    })
   }
 }
 
@@ -112,17 +126,22 @@ export function createId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}${rand}`
 }
 
-/** 清空全部业务表，供「清空本地数据」与导入前覆盖使用 */
+/** 清空全部业务表与待核对批次，供「清空本地数据」与覆盖导入使用 */
 export async function clearAllTables(): Promise<void> {
-  await db.transaction('rw', [db.turbines, db.blades, db.segments, db.defects, db.workOrders], async () => {
-    await Promise.all([
-      db.turbines.clear(),
-      db.blades.clear(),
-      db.segments.clear(),
-      db.defects.clear(),
-      db.workOrders.clear()
-    ])
-  })
+  await db.transaction(
+    'rw',
+    [db.turbines, db.blades, db.segments, db.defects, db.workOrders, db.inspectionBatches],
+    async () => {
+      await Promise.all([
+        db.turbines.clear(),
+        db.blades.clear(),
+        db.segments.clear(),
+        db.defects.clear(),
+        db.workOrders.clear(),
+        db.inspectionBatches.clear()
+      ])
+    }
+  )
 }
 
 /** 读取 localStorage 中的 UI 偏好 */

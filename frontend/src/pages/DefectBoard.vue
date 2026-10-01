@@ -573,6 +573,20 @@ const tableRows = computed(() => defectFilter.sortedRows.value)
           </template>
         </el-table-column>
         <el-table-column label="发现日期" prop="defect.foundAt" width="120" />
+        <el-table-column label="来源" width="150">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.defect.sourceBatchId"
+              :content="`来源记录号：${row.defect.sourceRecordId ?? '—'}`"
+              placement="top"
+            >
+              <el-tag size="small" type="info" effect="plain">
+                {{ row.defect.sourceTeam || '离线巡检包' }}
+              </el-tag>
+            </el-tooltip>
+            <span v-else class="muted">本地标注</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <span

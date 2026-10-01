@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
 import { Delete, Document, Download, Refresh, Upload } from '@element-plus/icons-vue'
 import EmptyPanel from '@/components/common/EmptyPanel.vue'
@@ -25,11 +26,15 @@ import {
 } from '@/utils/export'
 import { buildTurbineReport, reportToText, type TurbineReport } from '@/utils/report'
 import { formatArea, formatSize } from '@/utils/severity'
+import { validateInspectionPack } from '@/utils/inspectionMerge'
+import { useInspectionBatchStore } from '@/stores/inspectionBatchStore'
 import { FACE_LABEL, formatRange, type SegmentFace } from '@/types/segment'
 import { DEFECT_STATE_COLOR, type DefectState } from '@/types/defect'
 import type { BackupPayload } from '@/utils/db'
 
+const router = useRouter()
 const turbineStore = useTurbineStore()
+const batchStore = useInspectionBatchStore()
 
 const selectedTurbineId = ref<string>(turbineStore.currentTurbineId ?? '')
 
@@ -84,7 +89,8 @@ const dbMeta = computed(() => ({
   blades: turbineStore.blades.length,
   segments: turbineStore.segments.length,
   defects: turbineStore.defects.length,
-  workOrders: turbineStore.workOrders.length
+  workOrders: turbineStore.workOrders.length,
+  pendingBatches: batchStore.openBatches.length
 }))
 
 /** 面位中文标签（模板内免去类型断言） */
@@ -141,6 +147,22 @@ async function handleImportFile(file: UploadFile): Promise<void> {
     parsed = JSON.parse(text)
   } catch {
     ElMessage.error('JSON 解析失败，请确认文件内容完整')
+    return
+  }
+  // 离线巡检包不允许在此直接合并（会按 id 覆盖现场结果）：统一进入待核对批次
+  const packResult = validateInspectionPack(parsed)
+  if (packResult.ok && packResult.pack && (parsed as { kind?: string }).kind === 'offline-inspection-pack') {
+    try {
+      await ElMessageBox.confirm(
+        `检测到离线巡检包（来源：${packResult.pack.sourceTeam || '未标注检修队'}）。离线包必须先进待核对批次，不能在此直接按 id 合并。是否立即前往核对？`,
+        '检测到离线巡检包',
+        { type: 'warning', confirmButtonText: '前往离线包核对', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+    void router.push('/batches')
+    ElMessage.info('请在「离线巡检包合并」页导入该文件')
     return
   }
   const result = validateBackup(parsed)
@@ -286,6 +308,12 @@ watch(bladePanels, (panels) => {
           <el-descriptions-item label="展向分段">{{ dbMeta.segments }} 段</el-descriptions-item>
           <el-descriptions-item label="缺陷 / 工单">
             {{ dbMeta.defects }} 条 / {{ dbMeta.workOrders }} 张
+          </el-descriptions-item>
+          <el-descriptions-item label="待核对批次（不计入下方统计）">
+            <el-link v-if="dbMeta.pendingBatches > 0" type="warning" :underline="false" @click="router.push('/batches')">
+              {{ dbMeta.pendingBatches }} 批待核对 →
+            </el-link>
+            <span v-else class="muted">无</span>
           </el-descriptions-item>
         </el-descriptions>
       </div>
