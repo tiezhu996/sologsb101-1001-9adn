@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Document, Grid, Odometer, Tools, WarningFilled } from '@element-plus/icons-vue'
+import { Connection, Document, Grid, Odometer, Tools, WarningFilled } from '@element-plus/icons-vue'
 import { useTurbineStore } from '@/stores/turbineStore'
 import { useBladeStore } from '@/stores/bladeStore'
 import { useDefectStore } from '@/stores/defectStore'
 import { useWorkOrderStore } from '@/stores/workOrderStore'
+import { useMergeBatchStore } from '@/stores/mergeBatchStore'
 import { DB_NAME, DB_VERSION } from '@/utils/db'
 
 const route = useRoute()
@@ -14,6 +15,7 @@ const turbineStore = useTurbineStore()
 const bladeStore = useBladeStore()
 const defectStore = useDefectStore()
 const workOrderStore = useWorkOrderStore()
+const mergeBatchStore = useMergeBatchStore()
 
 /** 叶片分段页的跳转目标：上次查看的叶片 → 当前机组的首片叶片 → 全库首片叶片 */
 const targetBladeId = computed<string | null>(() => {
@@ -57,6 +59,13 @@ const navItems = computed(() => {
       label: '维修工单',
       icon: Tools,
       badge: String(workOrderStore.stats.total),
+      disabled: false
+    },
+    {
+      path: '/merge',
+      label: '离线合并',
+      icon: Connection,
+      badge: mergeBatchStore.pendingCount > 0 ? String(mergeBatchStore.pendingCount) : '',
       disabled: false
     },
     {

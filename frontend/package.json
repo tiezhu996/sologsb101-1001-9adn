@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
-    "preview": "vite preview --port 22801"
+    "preview": "vite preview --port 22801",
+    "verify:merge": "node -e \"const esbuild=require('esbuild');esbuild.build({entryPoints:['scripts/verify-merge.mts'],bundle:true,platform:'node',format:'esm',outfile:'scripts/.verify-merge.mjs',alias:{'@':'./src'},logLevel:'warning'}).then(()=>console.log('bundled'))\" && node scripts/.verify-merge.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@vitejs/plugin-vue": "^5.2.1",
+    "fake-indexeddb": "^6.2.5",
     "typescript": "~5.7.3",
     "vite": "^6.1.0",
     "vue-tsc": "^2.2.0"

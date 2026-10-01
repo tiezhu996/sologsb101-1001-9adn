@@ -2,6 +2,18 @@
 export type WorkOrderState = '待派' | '处理中' | '待验收' | '已闭环'
 
 /**
+ * 工单来源：离线巡检包整批写入时携带，撤回批次时仅删除合并写入的工单，
+ * 合并后班组在台账内新建的工单不受影响。
+ */
+export interface WorkOrderProvenance {
+  batchId: string
+  sourceName: string
+  /** 现场工单记录编号 */
+  sourceRecordId: string
+  mergedAt: number
+}
+
+/**
  * 维修工单：针对一条缺陷派发的检修任务，验收通过后回写缺陷为已修复。
  */
 export interface WorkOrder {
@@ -16,6 +28,8 @@ export interface WorkOrder {
   acceptor: string
   /** 闭环时间戳，未闭环为 null */
   closedAt: number | null
+  /** 离线巡检包合并来源；台账直接派工时为空 */
+  provenance?: WorkOrderProvenance
   createdAt: number
   updatedAt: number
 }

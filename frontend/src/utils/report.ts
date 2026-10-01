@@ -257,8 +257,9 @@ export function reportToText(report: TurbineReport): string {
         `    第 ${line.segment.index} 段 ${line.segment.startM}-${line.segment.endM} m｜${line.segment.face}｜翼型 ${line.segment.airfoil}｜剖面图 ${line.segment.sectionImage || '未上传'}｜缺陷 ${line.defectCount} 条`
       )
       line.defects.forEach((defect) => {
+        const source = defect.provenance ? `｜来源 外委巡检包[${defect.provenance.sourceRecordId}]` : ''
         lines.push(
-          `      · ${defect.type}（${defect.severity}）${defect.lengthMm}×${defect.widthMm} mm｜${defect.face}｜${defect.positionM} m｜发现 ${defect.foundAt}｜${defect.state}`
+          `      · ${defect.type}（${defect.severity}）${defect.lengthMm}×${defect.widthMm} mm｜${defect.face}｜${defect.positionM} m｜发现 ${defect.foundAt}｜${defect.state}${source}`
         )
       })
     })

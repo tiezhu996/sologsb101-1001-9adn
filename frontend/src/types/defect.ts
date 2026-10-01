@@ -8,6 +8,31 @@ export type Severity = '轻度' | '中度' | '重度'
 export type DefectState = '待处理' | '已派工' | '已修复'
 
 /**
+ * 来源与原值：离线巡检包整批写入时保留现场来源与原值快照，
+ * 台账手工录入 / 播种数据无此溯源信息（undefined）。
+ */
+export interface DefectProvenance {
+  /** 来源批次 id */
+  batchId: string
+  /** 来源巡检包文件名 */
+  sourceName: string
+  /** 现场记录编号 */
+  sourceRecordId: string
+  /** 现场原值（合并写入时的现场侧字段） */
+  original: {
+    type: DefectType
+    severity: Severity
+    lengthMm: number
+    widthMm: number
+    face: SegmentFace
+    positionM: number
+    foundAt: string
+    state: DefectState
+  }
+  mergedAt: number
+}
+
+/**
  * 缺陷：挂在某个展向分段上的一处叶片损伤。
  * 同一分段可叠加多条缺陷，逐级汇总到叶片与机组。
  */
@@ -27,6 +52,8 @@ export interface Defect {
   /** 发现日期 YYYY-MM-DD */
   foundAt: string
   state: DefectState
+  /** 离线巡检包合并来源与原值；台账直接录入时为空 */
+  provenance?: DefectProvenance
   createdAt: number
   updatedAt: number
 }

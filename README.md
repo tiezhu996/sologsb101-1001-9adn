@@ -4,6 +4,8 @@
 
 核心动作：**建立机组与叶片台账 → 划分展向分段并挂接剖面图 → 标注缺陷类型与尺寸面位 → 派发维修工单 → 导出巡检报告**。
 
+**离线巡检包合并**：外委检修队在无网机位各自导出巡检包，集控室导入后**先进入待核对批次**（不直接覆盖台账），按**机组编号 + 叶片序号 + 展向位置**匹配同一缺陷；尺寸、程度或面位有分歧时**并列保留**现场值与台账值，核对结论逐条确认后才**整批写入**（写入失败可重试，撤回批次会同步退回缺陷与工单）；完成情况、报告与后续导出均只按确认结果计算。
+
 纯前端单页应用（Vue 3 + TypeScript + Element Plus + Vite + Pinia + Vue Router + Dexie），**无后端、无数据库服务、无 API 服务**，全部数据保存在浏览器本地（IndexedDB 库名 `gbwindblade`，另有少量 localStorage 元数据），刷新或重启浏览器后依然存在。
 
 ---
@@ -42,7 +44,7 @@ docker compose up -d --build      # 代码改动后重新构建
 | 语言 | TypeScript（`strict: true`） | `npm run build` 内含 `vue-tsc --noEmit` 类型检查，零错误 |
 | UI 组件库 | Element Plus 2.x（含 `@element-plus/icons-vue`） | 表格、对话框、步骤流转、上传、折叠面板等交互 |
 | 构建工具 | Vite 6 | 开发服务器端口 22801 |
-| 状态管理 | Pinia（setup store） | `turbineStore` / `bladeStore` / `defectStore` / `workOrderStore` |
+| 状态管理 | Pinia（setup store） | `turbineStore` / `bladeStore` / `defectStore` / `workOrderStore` / `mergeBatchStore` |
 | 路由 | Vue Router 4（history 模式） | nginx 侧用 `try_files $uri $uri/ /index.html` 做 SPA fallback |
 | 本地存储 | Dexie 4（IndexedDB 封装）+ localStorage | 含数据结构版本号与 `upgrade` 升级迁移逻辑 |
 | 容器化 | Docker 多阶段构建：`node:20-alpine` → `nginx:alpine` | 构建阶段执行类型检查与打包，运行阶段仅托管静态产物 |
@@ -56,8 +58,9 @@ docker compose up -d --build      # 代码改动后重新构建
 | `/turbines` | 机组合账 | Turbine、Blade、Defect | 新建机组并**按叶片数派生叶片记录**、按机型 / 投运年份筛选、卡片回显缺陷总数与未闭环数、编辑时同步增删叶片、级联删除 |
 | `/blades/:id/segments` | 叶片分段与剖面 | Blade、Segment、Defect | 叶片切换、**按段数批量生成展向分段**、单段新增 / 编辑 / 删除、上传剖面图（本地预览）、按检修面查看段内缺陷、行内改状态 |
 | `/defects` | 缺陷标注台 | Defect、Segment | 按机组 / 类型 / 程度 / 面位 / 状态组合筛选（同步 URL query）、单条标注、勾选后批量改等级 / 改类型 / 改状态、批量派工、批量删除 |
-| `/workorders` | 维修工单 | WorkOrder、Defect | 按班组与状态筛选、派工建单、限期跟催（超期高亮）、状态流转 `待派 → 处理中 → 待验收 → 已闭环`、验收回写缺陷为已修复、撤回验收、删除后同步缺陷状态 |
-| `/report` | 报告与导出 | 全部模型 | 按机组生成巡检报告预览（分级分布、分段明细、工单跟踪）、查看数据结构版本、导出报告 / 全量备份 JSON、导入 JSON（覆盖 / 合并 / 追加）、清空与重新播种 |
+| `/workorders` | 维修工单 | WorkOrder、Defect | 按班组与状态筛选、派工建单、限期跟催（超期高亮）、状态流转 `待派 → 处理中 → 待验收 → 已闭环`、验收回写缺陷为已修复、撤回验收、删除后同步缺陷状态；合并写入的工单带「外委工单」来源标记 |
+| `/merge` | 离线巡检包合并 | MergeBatch、Defect、WorkOrder | 导入外委无网机位巡检包并生成**待核对批次**（确认前不写台账），按机组编号 / 叶片序号 / 展向位置匹配，新增 / 同一 / 分歧 / 无法定位分类展示，分歧字段红字并列对比，逐条选择并列保留 / 以现场为准 / 保留台账 / 不写入，整批确认写入、失败重试、撤回批次（缺陷与工单同步退回，被覆盖记录还原原值）、导出示例巡检包 |
+| `/report` | 报告与导出 | 全部模型 | 按机组生成巡检报告预览（分级分布、分段明细、工单跟踪、外委来源标记）、查看数据结构版本、导出报告 / 全量备份 JSON、导入 JSON（覆盖 / 合并 / 追加）、清空与重新播种 |
 
 ---
 
@@ -69,6 +72,7 @@ npm install
 npm run dev        # 开发服务器 http://localhost:22801
 npm run build      # 类型检查 + 生产构建，产物在 frontend/dist
 npm run preview    # 本地预览构建产物（http://localhost:22801）
+npm run verify:merge  # 离线合并全流程 Node 端到端校验（导入待核对→整批写入→撤回退回）
 ```
 
 > 首次打开页面会自动播种演示数据（幂等，只在机组表为空时执行）：
@@ -94,13 +98,13 @@ sologsb101-1001/
         ├── main.ts               # 挂载前先 ensureSeeded()，避免首屏空白
         ├── App.vue               # 顶部导航（5 个路由 + 数量徽标）、底部数据存储说明
         ├── styles/main.css
-        ├── types/                # turbine.ts blade.ts segment.ts defect.ts workOrder.ts
-        ├── stores/               # turbineStore.ts bladeStore.ts defectStore.ts workOrderStore.ts
+        ├── types/                # turbine.ts blade.ts segment.ts defect.ts workOrder.ts mergeBatch.ts
+        ├── stores/               # turbineStore.ts bladeStore.ts defectStore.ts workOrderStore.ts mergeBatchStore.ts
         ├── hooks/                # useDefectFilter.ts useIdbTable.ts
         ├── components/common/    # SeverityTag.vue FilterBar.vue StatBadge.vue EmptyPanel.vue
-        ├── utils/                # db.ts severity.ts report.ts export.ts
-        ├── pages/                # TurbineList.vue BladeSegment.vue DefectBoard.vue WorkOrderList.vue ReportView.vue
-        └── router/index.ts       # /turbines、/blades/:id/segments、/defects、/workorders、/report
+        ├── utils/                # db.ts severity.ts report.ts export.ts merge.ts
+        ├── pages/                # TurbineList.vue BladeSegment.vue DefectBoard.vue WorkOrderList.vue MergeBatches.vue ReportView.vue
+        └── router/index.ts       # /turbines、/blades/:id/segments、/defects、/workorders、/merge、/report
 ```
 
 分层约定：**页面只读 store，跨页状态不放组件内部 state**；`types/` 定义实体与筛选条件，`stores/` 维护列表与派生统计，`hooks/` 封装 Dexie 订阅与缺陷筛选派生值，`utils/` 提供持久化、单位换算与报告导出。
@@ -112,11 +116,12 @@ sologsb101-1001/
 | 项目 | 说明 |
 | --- | --- |
 | 库名 | IndexedDB `gbwindblade`（Dexie 封装） |
-| 结构版本 | `DB_VERSION = 2`，`utils/db.ts` 内含版本号与 `upgrade` 迁移（补全缺陷状态、工单验收字段、分段剖面图字段） |
-| 对象表 | `turbines`、`blades`、`segments`、`defects`、`workOrders`，均按 `id` 主键 + 外键索引 |
+| 结构版本 | `DB_VERSION = 3`，`utils/db.ts` 内含版本号与 `upgrade` 迁移（v2 补全缺陷状态 / 工单验收 / 分段剖面图字段；v3 新增离线合并批次表，缺陷与工单新增可选溯源字段无需回填） |
+| 对象表 | `turbines`、`blades`、`segments`、`defects`、`workOrders`、`mergeBatches`，均按 `id` 主键 + 外键索引 |
 | 级联关系 | 机组 → 叶片 → 展向分段 → 缺陷 → 维修工单；删除上级会级联清理下级记录 |
+| 离线合并 | 巡检包导入只写 `mergeBatches`（待核对），台账五表在整批确认前零变更；确认后缺陷 / 工单带 `provenance`（批次、来源文件、现场记录号、原值快照），撤回批次时据此删除合并记录并还原被覆盖原值 |
 | localStorage | `gbwindblade:ui-prefs`（上次查看的机组 / 叶片）、`gbwindblade:db-version`、`gbwindblade:last-backup-at` |
-| 备份 | 「报告与导出」页可导出 / 导入 JSON，导入支持覆盖、按 id 合并、追加（重新分配 id）三种方式 |
-| 演示数据 | 首次进入自动播种，幂等；也可在页面空状态点击「生成演示数据」或报告页「重新播种演示数据」 |
+| 备份 | 「报告与导出」页可导出 / 导入 JSON，导入支持覆盖、按 id 合并、追加（重新分配 id；追加模式不导入合并批次）；**外委巡检包请使用「离线巡检包合并」进入待核对批次，不要直接按 id 合并** |
+| 演示数据 | 首次进入自动播种，幂等；也可在页面空状态点击「生成演示数据」或报告页「重新播种演示数据」；离线合并页可基于当前台账「导出示例巡检包」 |
 
 > 数据不会上传到任何服务器；换浏览器或清理浏览器数据会导致本地记录丢失，请及时导出 JSON 备份。

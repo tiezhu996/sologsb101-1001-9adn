@@ -27,6 +27,9 @@ export function validateBackup(input: unknown): {
   for (const key of COLLECTIONS) {
     if (!Array.isArray(obj[key])) errors.push(`${key} 字段缺失或不是数组`)
   }
+  if ('mergeBatches' in obj && obj.mergeBatches !== undefined && !Array.isArray(obj.mergeBatches)) {
+    errors.push('mergeBatches 字段不是数组')
+  }
   if (errors.length > 0) return { ok: false, errors, payload: null }
 
   const payload: BackupPayload = {
@@ -37,19 +40,21 @@ export function validateBackup(input: unknown): {
     blades: obj.blades ?? [],
     segments: obj.segments ?? [],
     defects: obj.defects ?? [],
-    workOrders: obj.workOrders ?? []
+    workOrders: obj.workOrders ?? [],
+    mergeBatches: Array.isArray(obj.mergeBatches) ? obj.mergeBatches : []
   }
   return { ok: true, errors, payload }
 }
 
 /** 组装当前本地数据的全量备份对象 */
 export async function buildBackupPayload(): Promise<BackupPayload> {
-  const [turbines, blades, segments, defects, workOrders] = await Promise.all([
+  const [turbines, blades, segments, defects, workOrders, mergeBatches] = await Promise.all([
     db.turbines.toArray(),
     db.blades.toArray(),
     db.segments.toArray(),
     db.defects.toArray(),
-    db.workOrders.toArray()
+    db.workOrders.toArray(),
+    db.mergeBatches.toArray()
   ])
   return {
     app: 'gbwindblade',
@@ -59,12 +64,13 @@ export async function buildBackupPayload(): Promise<BackupPayload> {
     blades,
     segments,
     defects,
-    workOrders
+    workOrders,
+    mergeBatches
   }
 }
 
-/** 触发浏览器下载 */
-function download(fileName: string, content: string): void {
+/** 触发浏览器下载（纯文本） */
+export function downloadJsonFile(fileName: string, content: string): void {
   const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
@@ -74,6 +80,11 @@ function download(fileName: string, content: string): void {
   anchor.click()
   document.body.removeChild(anchor)
   URL.revokeObjectURL(url)
+}
+
+/** 触发浏览器下载（备份 JSON） */
+function download(fileName: string, content: string): void {
+  downloadJsonFile(fileName, content)
 }
 
 export function countPayload(payload: BackupPayload): Record<CollectionKey, number> {
@@ -117,19 +128,30 @@ export function readFileText(file: File): Promise<string> {
   })
 }
 
-/** 导入备份：overwrite=true 先清空全部表，否则按主键合并（同 id 覆盖） */
+/**
+ * 导入备份：overwrite=true 先清空全部表，否则按主键合并（同 id 覆盖）。
+ * mergeBatches 随覆盖 / 合并模式原样带入；追加模式不导入批次（批次内 id 与
+ * 落库痕迹无法随 remap 安全重映射），调用方应在追加前清空该字段。
+ */
 export async function importBackup(
   payload: BackupPayload,
   overwrite: boolean
 ): Promise<Record<CollectionKey, number>> {
   if (overwrite) await clearAllTables()
-  await db.transaction('rw', [db.turbines, db.blades, db.segments, db.defects, db.workOrders], async () => {
-    await db.turbines.bulkPut(payload.turbines)
-    await db.blades.bulkPut(payload.blades)
-    await db.segments.bulkPut(payload.segments)
-    await db.defects.bulkPut(payload.defects)
-    await db.workOrders.bulkPut(payload.workOrders)
-  })
+  await db.transaction(
+    'rw',
+    [db.turbines, db.blades, db.segments, db.defects, db.workOrders, db.mergeBatches],
+    async () => {
+      await db.turbines.bulkPut(payload.turbines)
+      await db.blades.bulkPut(payload.blades)
+      await db.segments.bulkPut(payload.segments)
+      await db.defects.bulkPut(payload.defects)
+      await db.workOrders.bulkPut(payload.workOrders)
+      if (payload.mergeBatches && payload.mergeBatches.length > 0) {
+        await db.mergeBatches.bulkPut(payload.mergeBatches)
+      }
+    }
+  )
   return countPayload(payload)
 }
 

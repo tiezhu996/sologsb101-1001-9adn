@@ -116,3 +116,10 @@ a {
 .el-table .cell {
   word-break: break-word;
 }
+
+/* 来源与原值悬浮卡片（el-tooltip 渲染到 body，需用非作用域样式） */
+.el-popper.source-popper {
+  max-width: 360px;
+  white-space: pre-line;
+  line-height: 1.7;
+}

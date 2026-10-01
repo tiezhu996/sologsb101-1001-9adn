@@ -26,3 +26,4 @@ Thumbs.db
 .vite/
 *.tsbuildinfo
 tsconfig.tsbuildinfo
+scripts/.verify-merge.mjs

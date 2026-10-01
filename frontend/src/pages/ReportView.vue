@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
-import { Delete, Document, Download, Refresh, Upload } from '@element-plus/icons-vue'
+import { Connection, Delete, Document, Download, Refresh, Upload } from '@element-plus/icons-vue'
 import EmptyPanel from '@/components/common/EmptyPanel.vue'
 import SeverityTag from '@/components/common/SeverityTag.vue'
 import StatBadge from '@/components/common/StatBadge.vue'
 import { useTurbineStore } from '@/stores/turbineStore'
+import { useMergeBatchStore } from '@/stores/mergeBatchStore'
 import {
   DB_NAME,
   DB_VERSION,
@@ -29,7 +31,9 @@ import { FACE_LABEL, formatRange, type SegmentFace } from '@/types/segment'
 import { DEFECT_STATE_COLOR, type DefectState } from '@/types/defect'
 import type { BackupPayload } from '@/utils/db'
 
+const router = useRouter()
 const turbineStore = useTurbineStore()
+const mergeBatchStore = useMergeBatchStore()
 
 const selectedTurbineId = ref<string>(turbineStore.currentTurbineId ?? '')
 
@@ -84,7 +88,9 @@ const dbMeta = computed(() => ({
   blades: turbineStore.blades.length,
   segments: turbineStore.segments.length,
   defects: turbineStore.defects.length,
-  workOrders: turbineStore.workOrders.length
+  workOrders: turbineStore.workOrders.length,
+  pendingBatches: mergeBatchStore.pendingCount,
+  mergeBatches: mergeBatchStore.batches.length
 }))
 
 /** 面位中文标签（模板内免去类型断言） */
@@ -131,6 +137,11 @@ const importErrors = ref<string[]>([])
 const importPayload = ref<BackupPayload | null>(null)
 const importCounts = ref<Record<string, number> | null>(null)
 
+/** 外委巡检包不允许按 id 直接合并（会同 id 覆盖现场结果），统一转待核对批次 */
+function goMergeBatches(): void {
+  void router.push('/merge')
+}
+
 async function handleImportFile(file: UploadFile): Promise<void> {
   const raw = file.raw
   if (!raw) return
@@ -166,13 +177,16 @@ async function submitImport(): Promise<void> {
     if (importMode.value === 'overwrite') {
       await importBackup(payload, true)
     } else if (importMode.value === 'append') {
-      await importBackup(remapIds(payload), false)
+      const remapped = remapIds(payload)
+      // 追加模式无法安全重映射批次内的落库痕迹，批次不随追加导入
+      remapped.mergeBatches = []
+      await importBackup(remapped, false)
     } else {
       await importBackup(payload, false)
     }
     importVisible.value = false
     const modeText =
-      importMode.value === 'overwrite' ? '覆盖导入' : importMode.value === 'append' ? '追加导入（已重新分配 id）' : '按 id 合并导入'
+      importMode.value === 'overwrite' ? '覆盖导入' : importMode.value === 'append' ? '追加导入（已重新分配 id，不导入批次）' : '按 id 合并导入'
     ElMessage.success(`${modeText}完成：机组 ${payload.turbines.length} · 叶片 ${payload.blades.length} · 分段 ${payload.segments.length} · 缺陷 ${payload.defects.length} · 工单 ${payload.workOrders.length}`)
   } finally {
     importSubmitting.value = false
@@ -242,6 +256,9 @@ watch(bladePanels, (panels) => {
         <el-button :icon="Document" @click="openStructure">查看导出结构</el-button>
         <el-button :icon="Download" @click="handleExportReport" :disabled="!report">导出本机组报告</el-button>
         <el-button type="primary" :icon="Download" @click="handleExportBackup">导出全量备份</el-button>
+        <el-button type="warning" plain :icon="Connection" @click="goMergeBatches">
+          外委巡检包合并{{ mergeBatchStore.pendingCount > 0 ? `（${mergeBatchStore.pendingCount} 批待核对）` : '' }}
+        </el-button>
         <el-upload
           :auto-upload="false"
           :show-file-list="false"
@@ -286,6 +303,9 @@ watch(bladePanels, (panels) => {
           <el-descriptions-item label="展向分段">{{ dbMeta.segments }} 段</el-descriptions-item>
           <el-descriptions-item label="缺陷 / 工单">
             {{ dbMeta.defects }} 条 / {{ dbMeta.workOrders }} 张
+          </el-descriptions-item>
+          <el-descriptions-item label="待核对批次">
+            {{ dbMeta.pendingBatches }} 个 / 历史批次 {{ dbMeta.mergeBatches }} 个
           </el-descriptions-item>
         </el-descriptions>
       </div>
@@ -416,7 +436,16 @@ watch(bladePanels, (panels) => {
                 <el-table-column type="expand" width="60">
                   <template #default="{ row }">
                     <el-table :data="row.defects" size="small" border class="defect-subtable">
-                      <el-table-column label="类型" prop="type" width="110" />
+                      <el-table-column label="类型" width="110">
+                        <template #default="{ row: defect }">
+                          <div class="cell-stack">
+                            <span>{{ defect.type }}</span>
+                            <el-tag v-if="defect.provenance" size="small" type="warning" effect="plain">
+                              外委{{ defect.provenance.sourceRecordId.slice(-6) }}
+                            </el-tag>
+                          </div>
+                        </template>
+                      </el-table-column>
                       <el-table-column label="程度" width="150">
                         <template #default="{ row: defect }">
                           <SeverityTag :severity="defect.severity" size="small" />
@@ -472,7 +501,16 @@ watch(bladePanels, (panels) => {
             <el-table-column label="缺陷" min-width="150">
               <template #default="{ row }">{{ row.defectType }}（{{ row.severity }}）</template>
             </el-table-column>
-            <el-table-column label="班组" prop="order.team" width="140" />
+            <el-table-column label="班组" min-width="150">
+              <template #default="{ row }">
+                <div class="cell-stack">
+                  <span>{{ row.order.team }}</span>
+                  <el-tag v-if="row.order.provenance" size="small" type="warning" effect="plain">
+                    外委工单
+                  </el-tag>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="限期" width="130">
               <template #default="{ row }">
                 <span class="mono">{{ row.order.dueDate }}</span>
@@ -518,6 +556,17 @@ watch(bladePanels, (panels) => {
           :title="`文件 ${importFile} 校验通过，请选择导入方式。`"
           class="import-alert"
         />
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          title="外委检修队的无网机位巡检包请使用「外委巡检包合并」进入待核对批次，按机组编号、叶片序号与展向位置核对后再写入；按 id 合并会以后导入记录整条覆盖同 id 的现场结果。"
+          class="import-alert"
+        >
+          <el-button size="small" type="warning" plain :icon="Connection" @click="importVisible = false; goMergeBatches()">
+            前往离线巡检包合并
+          </el-button>
+        </el-alert>
         <el-descriptions v-if="importCounts" :column="3" size="small" border class="import-meta">
           <el-descriptions-item label="机组">{{ importCounts.turbines }}</el-descriptions-item>
           <el-descriptions-item label="叶片">{{ importCounts.blades }}</el-descriptions-item>
@@ -636,6 +685,13 @@ watch(bladePanels, (panels) => {
   margin: 8px 0 0;
   padding-left: 20px;
   color: #c0392b;
+  font-size: 13px;
+}
+
+.cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   font-size: 13px;
 }
 </style>

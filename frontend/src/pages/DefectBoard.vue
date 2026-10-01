@@ -412,6 +412,20 @@ function stateBg(state: string): string {
   return DEFECT_STATE_BG[state as DefectState] ?? '#eef4f7'
 }
 
+/** 来源悬浮卡片文案：合并写入时展示批次、现场记录号与现场原值 */
+function provenanceTip(row: DefectRow): string {
+  const provenance = row.defect.provenance
+  if (!provenance) return '集控室台账直接录入'
+  return [
+    `来源：${provenance.sourceName}`,
+    `现场记录号：${provenance.sourceRecordId}`,
+    `现场原值：${provenance.original.type}（${provenance.original.severity}）`,
+    `尺寸：${provenance.original.lengthMm} × ${provenance.original.widthMm} mm`,
+    `面位：${provenance.original.face}｜位置：${provenance.original.positionM} m`,
+    `发现：${provenance.original.foundAt}｜状态：${provenance.original.state}`
+  ].join('\n')
+}
+
 function locate(row: DefectRow): void {
   if (!row.blade) {
     ElMessage.warning('该缺陷缺少叶片归属，无法定位')
@@ -581,6 +595,20 @@ const tableRows = computed(() => defectFilter.sortedRows.value)
             >
               {{ row.defect.state }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="120">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.defect.provenance"
+              :content="provenanceTip(row)"
+              placement="top"
+              :show-after="200"
+              popper-class="source-popper"
+            >
+              <el-tag size="small" type="warning" effect="plain">外委合并</el-tag>
+            </el-tooltip>
+            <el-tag v-else size="small" type="info" effect="plain">台账录入</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="工单" min-width="200">
